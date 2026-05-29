@@ -133,14 +133,20 @@ class CosyVoiceModel:
         self.llm_end_dict[uuid] = True
 
     def token2wav(self, token, prompt_token, prompt_feat, embedding, uuid, finalize=False, speed=1.0):
+        min_token_len = max(4, int(getattr(self.flow, 'pre_lookahead_len', 0)) + 1)
+        if token.shape[1] < min_token_len:
+            pad_len = min_token_len - token.shape[1]
+            pad_value = token[:, -1:] if token.shape[1] > 0 else torch.zeros((token.shape[0], 1), dtype=token.dtype, device=token.device)
+            token = torch.concat([token, pad_value.repeat(1, pad_len)], dim=1)
+        flow_dtype = next(self.flow.parameters(), torch.zeros((), device=self.device)).dtype
         with torch.cuda.amp.autocast(self.fp16):
             tts_mel, self.flow_cache_dict[uuid] = self.flow.inference(token=token.to(self.device, dtype=torch.int32),
                                                                       token_len=torch.tensor([token.shape[1]], dtype=torch.int32).to(self.device),
                                                                       prompt_token=prompt_token.to(self.device),
                                                                       prompt_token_len=torch.tensor([prompt_token.shape[1]], dtype=torch.int32).to(self.device),
-                                                                      prompt_feat=prompt_feat.to(self.device),
+                                                                      prompt_feat=prompt_feat.to(self.device, dtype=flow_dtype),
                                                                       prompt_feat_len=torch.tensor([prompt_feat.shape[1]], dtype=torch.int32).to(self.device),
-                                                                      embedding=embedding.to(self.device),
+                                                                      embedding=embedding.to(self.device, dtype=flow_dtype),
                                                                       flow_cache=self.flow_cache_dict[uuid])
 
         # mel overlap fade in out
@@ -286,14 +292,20 @@ class CosyVoice2Model(CosyVoiceModel):
         del self.llm.llm.model.model.layers
 
     def token2wav(self, token, prompt_token, prompt_feat, embedding, token_offset, uuid, stream=False, finalize=False, speed=1.0):
+        min_token_len = max(4, int(getattr(self.flow, 'pre_lookahead_len', 0)) + 1)
+        if token.shape[1] < min_token_len:
+            pad_len = min_token_len - token.shape[1]
+            pad_value = token[:, -1:] if token.shape[1] > 0 else torch.zeros((token.shape[0], 1), dtype=token.dtype, device=token.device)
+            token = torch.concat([token, pad_value.repeat(1, pad_len)], dim=1)
+        flow_dtype = next(self.flow.parameters(), torch.zeros((), device=self.device)).dtype
         with torch.cuda.amp.autocast(self.fp16):
             tts_mel, _ = self.flow.inference(token=token.to(self.device, dtype=torch.int32),
                                              token_len=torch.tensor([token.shape[1]], dtype=torch.int32).to(self.device),
                                              prompt_token=prompt_token.to(self.device),
                                              prompt_token_len=torch.tensor([prompt_token.shape[1]], dtype=torch.int32).to(self.device),
-                                             prompt_feat=prompt_feat.to(self.device),
+                                             prompt_feat=prompt_feat.to(self.device, dtype=flow_dtype),
                                              prompt_feat_len=torch.tensor([prompt_feat.shape[1]], dtype=torch.int32).to(self.device),
-                                             embedding=embedding.to(self.device),
+                                             embedding=embedding.to(self.device, dtype=flow_dtype),
                                              streaming=stream,
                                              finalize=finalize)
         tts_mel = tts_mel[:, :, token_offset * self.flow.token_mel_ratio:]
@@ -414,14 +426,20 @@ class CosyVoice3Model(CosyVoice2Model):
         self.silent_tokens = [1, 2, 28, 29, 55, 248, 494, 2241, 2242, 2322, 2323]
 
     def token2wav(self, token, prompt_token, prompt_feat, embedding, token_offset, uuid, stream=False, finalize=False, speed=1.0):
+        min_token_len = max(4, int(getattr(self.flow, 'pre_lookahead_len', 0)) + 1)
+        if token.shape[1] < min_token_len:
+            pad_len = min_token_len - token.shape[1]
+            pad_value = token[:, -1:] if token.shape[1] > 0 else torch.zeros((token.shape[0], 1), dtype=token.dtype, device=token.device)
+            token = torch.concat([token, pad_value.repeat(1, pad_len)], dim=1)
+        flow_dtype = next(self.flow.parameters(), torch.zeros((), device=self.device)).dtype
         with torch.cuda.amp.autocast(self.fp16):
             tts_mel, _ = self.flow.inference(token=token.to(self.device, dtype=torch.int32),
                                              token_len=torch.tensor([token.shape[1]], dtype=torch.int32).to(self.device),
                                              prompt_token=prompt_token.to(self.device),
                                              prompt_token_len=torch.tensor([prompt_token.shape[1]], dtype=torch.int32).to(self.device),
-                                             prompt_feat=prompt_feat.to(self.device),
+                                             prompt_feat=prompt_feat.to(self.device, dtype=flow_dtype),
                                              prompt_feat_len=torch.tensor([prompt_feat.shape[1]], dtype=torch.int32).to(self.device),
-                                             embedding=embedding.to(self.device),
+                                             embedding=embedding.to(self.device, dtype=flow_dtype),
                                              streaming=stream,
                                              finalize=finalize)
             tts_mel = tts_mel[:, :, token_offset * self.flow.token_mel_ratio:]

@@ -12,16 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Generator
 from tqdm import tqdm
 from hyperpyyaml import load_hyperpyyaml
 from modelscope import snapshot_download
 import torch
+import ruamel.yaml
 from cosyvoice.cli.frontend import CosyVoiceFrontEnd
 from cosyvoice.cli.model import CosyVoiceModel, CosyVoice2Model, CosyVoice3Model
 from cosyvoice.utils.file_utils import logging
 from cosyvoice.utils.class_utils import get_model_type
+
+# Ensure Matcha-TTS is importable when running locally.
+_matcha_path = Path(__file__).resolve().parents[2] / "third_party" / "Matcha-TTS"
+if _matcha_path.exists():
+    sys.path.insert(0, str(_matcha_path))
+
+# Compatibility: some ruamel.yaml Loader versions lack max_depth, which breaks hyperpyyaml.
+if not hasattr(ruamel.yaml.Loader, "max_depth"):
+    ruamel.yaml.Loader.max_depth = None
+if not hasattr(ruamel.yaml.SafeLoader, "max_depth"):
+    ruamel.yaml.SafeLoader.max_depth = None
 
 
 class CosyVoice:

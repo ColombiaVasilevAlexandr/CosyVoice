@@ -479,6 +479,15 @@ class Qwen2LM(TransformerLM):
 
     @torch.inference_mode()
     def inference_wrapper(self, lm_input, sampling, min_len, max_len, uuid):
+        # Keep decoder input dtype aligned with attention projection weights to avoid Float/BFloat16 matmul errors.
+        llm_dtype = None
+        try:
+            llm_dtype = self.llm.model.model.layers[0].self_attn.q_proj.weight.dtype
+        except Exception:
+            llm_param = next(self.llm.parameters(), None)
+            llm_dtype = llm_param.dtype if llm_param is not None else None
+        if llm_dtype is not None and lm_input.dtype != llm_dtype:
+            lm_input = lm_input.to(dtype=llm_dtype)
         if hasattr(self, 'vllm'):
             from vllm import SamplingParams, RequestOutput
             sampling_params = SamplingParams(top_k=sampling,
@@ -512,17 +521,23 @@ class Qwen2LM(TransformerLM):
             out_tokens = []
             cache = None
             for i in range(max_len):
+                if llm_dtype is not None and lm_input.dtype != llm_dtype:
+                    lm_input = lm_input.to(dtype=llm_dtype)
                 y_pred, cache = self.llm.forward_one_step(lm_input,
                                                           masks=torch.tril(torch.ones((1, lm_input.shape[1], lm_input.shape[1]), device=lm_input.device)).to(torch.bool),
                                                           cache=cache)
-                logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
+                decoder_input = y_pred[:, -1]
+                decoder_weight = getattr(self.llm_decoder, "weight", None)
+                if decoder_weight is not None and decoder_input.dtype != decoder_weight.dtype:
+                    decoder_input = decoder_input.to(dtype=decoder_weight.dtype)
+                logp = self.llm_decoder(decoder_input).log_softmax(dim=-1)
                 top_ids = self.sampling_ids(logp.squeeze(dim=0), out_tokens, sampling, ignore_eos=True if i < min_len else False)
                 if top_ids in self.stop_token_ids:
                     break
                 # in stream mode, yield token one by one
                 yield top_ids
                 out_tokens.append(top_ids)
-                lm_input = self.speech_embedding.weight[top_ids].reshape(1, 1, -1)
+                lm_input = self.speech_embedding.weight[top_ids].reshape(1, 1, -1).to(dtype=llm_dtype if llm_dtype is not None else lm_input.dtype)
 
     @torch.inference_mode()
     def inference_bistream(
